@@ -1,0 +1,399 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Probability Calibration Dice Training Game</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: #0f1117; }
+    input[type=range] { accent-color: #8b5cf6; }
+    @keyframes spin {
+      0% { transform: rotate(0deg) scale(1); opacity: 1; }
+      50% { transform: rotate(180deg) scale(1.3); opacity: 0.7; }
+      100% { transform: rotate(360deg) scale(1); opacity: 1; }
+    }
+    .die-spin { animation: spin 0.6s ease-in-out; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 0.3s ease-out; }
+    .bar-fill { transition: height 0.5s ease; }
+  </style>
+</head>
+<body class="min-h-screen text-white flex flex-col items-center p-4 gap-4">
+  <header class="text-center mt-2">
+    <h1 class="text-2xl font-bold text-violet-300">Probability Calibration</h1>
+    <p class="text-sm text-gray-400">Dice Training Game — 20 Rounds</p>
+  </header>
+
+  <!-- Main game area -->
+  <div id="gameArea" class="w-full max-w-xl flex flex-col gap-4">
+
+    <!-- Progress -->
+    <div class="flex items-center justify-between text-sm">
+      <span class="text-gray-400">Round <span id="roundNum" class="text-white font-bold">1</span> of 20</span>
+      <span class="text-gray-400">Brier Score: <span id="runningBrier" class="text-violet-300 font-mono font-bold" aria-live="polite">—</span></span>
+    </div>
+    <div class="w-full bg-gray-800 rounded-full h-2">
+      <div id="progressBar" class="bg-violet-600 rounded-full h-2 transition-all" style="width:0%" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+    </div>
+
+    <!-- Die display -->
+    <div class="bg-gray-900 rounded-2xl p-6 flex flex-col items-center gap-4">
+      <div id="dieDisplay" class="text-8xl select-none" role="img" aria-label="Die" aria-live="polite">🎲</div>
+      <div id="dieTypeLabel" class="text-lg font-bold text-violet-300" aria-live="polite">—</div>
+      <div id="questionText" class="text-xl font-semibold text-center text-white" aria-live="polite">Press Start to begin</div>
+    </div>
+
+    <!-- Probability input -->
+    <div id="estimateArea" class="bg-gray-900 rounded-xl p-4 flex flex-col gap-3 hidden">
+      <label class="text-sm text-gray-300 font-medium" for="probSlider">Your probability estimate:</label>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-gray-400">0%</span>
+        <input type="range" id="probSlider" min="0" max="100" value="50" class="flex-1" aria-label="Probability estimate" />
+        <span class="text-xs text-gray-400">100%</span>
+      </div>
+      <div class="text-center text-3xl font-mono font-bold text-violet-300" id="probDisplay" aria-live="polite">50%</div>
+      <button onclick="submitEstimate()" class="bg-violet-600 hover:bg-violet-500 py-3 rounded-xl font-bold text-base transition" aria-label="Submit probability estimate and roll">
+        Roll the Die
+      </button>
+    </div>
+
+    <!-- Result -->
+    <div id="resultArea" class="hidden bg-gray-900 rounded-xl p-4 flex flex-col gap-3 fade-in" aria-live="polite">
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-medium text-gray-300">Result:</span>
+        <span id="rollResult" class="text-xl font-bold font-mono"></span>
+      </div>
+      <div class="flex items-center justify-between">
+        <span class="text-sm text-gray-400">Outcome:</span>
+        <span id="outcomeLabel" class="font-semibold"></span>
+      </div>
+      <div class="flex items-center justify-between">
+        <span class="text-sm text-gray-400">Your estimate:</span>
+        <span id="estimateLabel" class="font-mono text-violet-300"></span>
+      </div>
+      <div class="flex items-center justify-between">
+        <span class="text-sm text-gray-400">Brier score this round:</span>
+        <span id="brierLabel" class="font-mono font-bold"></span>
+      </div>
+      <button onclick="nextRound()" class="bg-gray-700 hover:bg-gray-600 py-2 rounded-lg text-sm font-medium transition mt-1" aria-label="Continue to next round">
+        Next Round →
+      </button>
+    </div>
+
+    <!-- Start button -->
+    <button id="startBtn" onclick="startGame()" class="bg-violet-700 hover:bg-violet-600 py-3 rounded-xl font-bold text-base transition" aria-label="Start calibration game">
+      Start Game
+    </button>
+
+  </div>
+
+  <!-- Final screen (hidden until end) -->
+  <div id="finalScreen" class="hidden w-full max-w-2xl flex flex-col gap-5" aria-live="polite">
+    <div class="bg-gray-900 rounded-2xl p-5 flex flex-col gap-3 text-center">
+      <h2 class="text-2xl font-bold text-violet-300">Game Complete!</h2>
+      <p class="text-gray-400 text-sm">Mean Brier Score: <span id="finalBrier" class="text-white font-mono font-bold text-2xl"></span></p>
+      <p id="calibrationClass" class="text-base font-semibold mt-1"></p>
+    </div>
+
+    <!-- Calibration curve -->
+    <div class="bg-gray-900 rounded-xl p-4 flex flex-col gap-3">
+      <h3 class="text-sm font-semibold text-gray-200 uppercase tracking-wide">Calibration Curve</h3>
+      <p class="text-xs text-gray-500">Bars show actual frequency (%) when you stated a given probability bucket. Perfect calibration = bar height equals bucket midpoint.</p>
+      <div id="calibrationChart" class="flex items-end gap-1 h-32" role="img" aria-label="Calibration curve chart"></div>
+      <div class="flex justify-between text-xs text-gray-500 px-1">
+        <span>0-9%</span><span>10-19%</span><span>20-29%</span><span>30-39%</span><span>40-49%</span>
+        <span>50-59%</span><span>60-69%</span><span>70-79%</span><span>80-89%</span><span>90-100%</span>
+      </div>
+    </div>
+
+    <!-- Round history -->
+    <div class="bg-gray-900 rounded-xl p-4 flex flex-col gap-2">
+      <h3 class="text-sm font-semibold text-gray-200 uppercase tracking-wide">Round History</h3>
+      <div id="historyList" class="flex flex-col gap-1 max-h-48 overflow-y-auto" role="list"></div>
+    </div>
+
+    <button onclick="restartGame()" class="bg-violet-700 hover:bg-violet-600 py-3 rounded-xl font-bold text-base transition" aria-label="Play again">Play Again</button>
+  </div>
+
+<script>
+(function() {
+  const STORAGE_KEY = 'calibration_history_v1';
+  const DIE_TYPES = [
+    { sides: 4,  emoji: '🔷', label: 'd4'  },
+    { sides: 6,  emoji: '🎲', label: 'd6'  },
+    { sides: 8,  emoji: '🔶', label: 'd8'  },
+    { sides: 10, emoji: '💠', label: 'd10' },
+    { sides: 12, emoji: '🔮', label: 'd12' },
+    { sides: 20, emoji: '⬡',  label: 'd20' }
+  ];
+  const TOTAL_ROUNDS = 20;
+
+  let currentRound = 0;
+  let rounds = []; // {estimate, outcome, brier, die, condition, roll}
+  let currentQuestion = null;
+  let animating = false;
+
+  function loadHistory() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || []; } catch(e) { return []; }
+  }
+  function saveHistory(rounds) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(rounds)); } catch(e) {}
+  }
+
+  function generateQuestion() {
+    const die = DIE_TYPES[Math.floor(Math.random() * DIE_TYPES.length)];
+    // Random range [min, max] where min >= 1, max <= die.sides
+    let min, max, condText, condType;
+    const r = Math.random();
+    if (r < 0.33) {
+      // roll >= N
+      min = 2 + Math.floor(Math.random() * (die.sides - 2));
+      condText = 'roll ≥ ' + min;
+      condType = 'gte';
+      return { die, condText, condType, threshold: min };
+    } else if (r < 0.66) {
+      // roll <= N
+      max = 1 + Math.floor(Math.random() * (die.sides - 1));
+      condText = 'roll ≤ ' + max;
+      condType = 'lte';
+      return { die, condText, condType, threshold: max };
+    } else {
+      // exact value
+      const val = 1 + Math.floor(Math.random() * die.sides);
+      condText = 'roll exactly ' + val;
+      condType = 'eq';
+      return { die, condText, condType, threshold: val };
+    }
+  }
+
+  function trueProb(q) {
+    const s = q.die.sides;
+    if (q.condType === 'gte') return (s - q.threshold + 1) / s;
+    if (q.condType === 'lte') return q.threshold / s;
+    if (q.condType === 'eq') return 1 / s;
+    return 0;
+  }
+
+  window.startGame = function() {
+    currentRound = 0;
+    rounds = [];
+    document.getElementById('startBtn').classList.add('hidden');
+    document.getElementById('finalScreen').classList.add('hidden');
+    document.getElementById('gameArea').classList.remove('hidden');
+    showRound();
+  };
+
+  function showRound() {
+    currentQuestion = generateQuestion();
+    const q = currentQuestion;
+
+    document.getElementById('roundNum').textContent = currentRound + 1;
+    document.getElementById('progressBar').style.width = (currentRound / TOTAL_ROUNDS * 100) + '%';
+    document.getElementById('progressBar').setAttribute('aria-valuenow', currentRound);
+
+    document.getElementById('dieDisplay').textContent = q.die.emoji;
+    document.getElementById('dieTypeLabel').textContent = q.die.label + ' (1–' + q.die.sides + ')';
+    document.getElementById('questionText').textContent = 'What is P(' + q.condText + ')?';
+
+    document.getElementById('probSlider').value = 50;
+    document.getElementById('probDisplay').textContent = '50%';
+    document.getElementById('estimateArea').classList.remove('hidden');
+    document.getElementById('resultArea').classList.add('hidden');
+  }
+
+  document.getElementById('probSlider').addEventListener('input', function() {
+    document.getElementById('probDisplay').textContent = this.value + '%';
+  });
+
+  window.submitEstimate = function() {
+    if (animating) return;
+    animating = true;
+    const q = currentQuestion;
+    const estimate = parseInt(document.getElementById('probSlider').value) / 100;
+
+    // Roll the die
+    const roll = 1 + Math.floor(Math.random() * q.die.sides);
+    let outcome;
+    if (q.condType === 'gte') outcome = roll >= q.threshold ? 1 : 0;
+    else if (q.condType === 'lte') outcome = roll <= q.threshold ? 1 : 0;
+    else outcome = roll === q.threshold ? 1 : 0;
+
+    const brier = Math.pow(estimate - outcome, 2);
+
+    // Animate die
+    const dieEl = document.getElementById('dieDisplay');
+    dieEl.classList.add('die-spin');
+    let ticks = 0;
+    const interval = setInterval(() => {
+      dieEl.textContent = Math.ceil(Math.random() * q.die.sides);
+      ticks++;
+      if (ticks > 6) {
+        clearInterval(interval);
+        dieEl.textContent = roll;
+        dieEl.classList.remove('die-spin');
+
+        // Show result
+        document.getElementById('estimateArea').classList.add('hidden');
+        document.getElementById('resultArea').classList.remove('hidden');
+        document.getElementById('rollResult').textContent = roll;
+
+        const outcomeLabel = document.getElementById('outcomeLabel');
+        if (outcome === 1) {
+          outcomeLabel.textContent = 'YES — condition met';
+          outcomeLabel.className = 'font-semibold text-green-400';
+        } else {
+          outcomeLabel.textContent = 'NO — condition not met';
+          outcomeLabel.className = 'font-semibold text-red-400';
+        }
+
+        document.getElementById('estimateLabel').textContent = (estimate * 100).toFixed(0) + '%';
+        const brierEl = document.getElementById('brierLabel');
+        brierEl.textContent = brier.toFixed(4);
+        brierEl.className = 'font-mono font-bold ' + (brier < 0.1 ? 'text-green-400' : brier < 0.25 ? 'text-yellow-400' : 'text-red-400');
+
+        rounds.push({ estimate, outcome, brier, die: q.die.label, condition: q.condText, roll, trueP: trueProb(q) });
+        const avgBrier = rounds.reduce((s, r) => s + r.brier, 0) / rounds.length;
+        document.getElementById('runningBrier').textContent = avgBrier.toFixed(4);
+
+        animating = false;
+      }
+    }, 60);
+  };
+
+  window.nextRound = function() {
+    currentRound++;
+    if (currentRound >= TOTAL_ROUNDS) {
+      showFinalScreen();
+    } else {
+      document.getElementById('resultArea').classList.add('hidden');
+      showRound();
+    }
+  };
+
+  function showFinalScreen() {
+    document.getElementById('gameArea').classList.add('hidden');
+    document.getElementById('finalScreen').classList.remove('hidden');
+
+    const meanBrier = rounds.reduce((s, r) => s + r.brier, 0) / rounds.length;
+    document.getElementById('finalBrier').textContent = meanBrier.toFixed(4);
+
+    const classEl = document.getElementById('calibrationClass');
+    if (meanBrier < 0.05) {
+      classEl.textContent = 'Excellent calibration! You are very well-calibrated.';
+      classEl.className = 'text-base font-semibold text-green-400';
+    } else if (meanBrier < 0.15) {
+      classEl.textContent = 'Good calibration — minor over/under-confidence detected.';
+      classEl.className = 'text-base font-semibold text-yellow-400';
+    } else if (meanBrier < 0.25) {
+      classEl.textContent = 'Moderate calibration — significant systematic bias.';
+      classEl.className = 'text-base font-semibold text-orange-400';
+    } else {
+      classEl.textContent = 'Poor calibration — estimates deviate widely from actual probabilities.';
+      classEl.className = 'text-base font-semibold text-red-400';
+    }
+
+    // Calibration curve: 10 buckets [0-9%, 10-19%, ..., 90-100%]
+    const buckets = Array.from({ length: 10 }, () => ({ total: 0, successes: 0 }));
+    rounds.forEach(r => {
+      const bucket = Math.min(9, Math.floor(r.estimate * 10));
+      buckets[bucket].total++;
+      buckets[bucket].successes += r.outcome;
+    });
+
+    const chart = document.getElementById('calibrationChart');
+    chart.innerHTML = '';
+    buckets.forEach((b, i) => {
+      const target = (i * 10 + 5) / 100; // midpoint
+      const actual = b.total > 0 ? b.successes / b.total : null;
+
+      const col = document.createElement('div');
+      col.className = 'flex-1 flex flex-col items-center justify-end gap-0.5 h-full';
+
+      if (actual !== null) {
+        const bar = document.createElement('div');
+        bar.className = 'w-full bg-violet-500 rounded-t bar-fill';
+        bar.style.height = '0%';
+        bar.setAttribute('role', 'presentation');
+        setTimeout(() => { bar.style.height = (actual * 100) + '%'; }, 50);
+        col.appendChild(bar);
+
+        const targetLine = document.createElement('div');
+        targetLine.className = 'w-full h-0.5 bg-gray-400 relative';
+        targetLine.title = 'Target: ' + (target * 100).toFixed(0) + '%';
+        col.style.position = 'relative';
+      } else {
+        const empty = document.createElement('div');
+        empty.className = 'w-full h-1 bg-gray-700 rounded';
+        col.appendChild(empty);
+      }
+
+      chart.appendChild(col);
+    });
+
+    // History
+    const histEl = document.getElementById('historyList');
+    histEl.innerHTML = '';
+    rounds.forEach((r, i) => {
+      const row = document.createElement('div');
+      row.className = 'flex items-center gap-2 text-xs py-1 border-b border-gray-800';
+      row.setAttribute('role', 'listitem');
+
+      const numSpan = document.createElement('span');
+      numSpan.className = 'text-gray-500 w-5';
+      numSpan.textContent = i + 1 + '.';
+
+      const dieSpan = document.createElement('span');
+      dieSpan.className = 'text-violet-400 w-8';
+      dieSpan.textContent = r.die;
+
+      const condSpan = document.createElement('span');
+      condSpan.className = 'text-gray-300 flex-1';
+      condSpan.textContent = r.condition + ' → rolled ' + r.roll;
+
+      const estSpan = document.createElement('span');
+      estSpan.className = 'text-violet-300 w-12 text-right';
+      estSpan.textContent = (r.estimate * 100).toFixed(0) + '%';
+
+      const outSpan = document.createElement('span');
+      outSpan.className = 'w-8 text-center font-bold ' + (r.outcome ? 'text-green-400' : 'text-red-400');
+      outSpan.textContent = r.outcome ? 'YES' : 'NO';
+
+      const brierSpan = document.createElement('span');
+      brierSpan.className = 'w-14 text-right font-mono ' + (r.brier < 0.1 ? 'text-green-400' : r.brier < 0.25 ? 'text-yellow-400' : 'text-red-400');
+      brierSpan.textContent = r.brier.toFixed(4);
+
+      row.appendChild(numSpan);
+      row.appendChild(dieSpan);
+      row.appendChild(condSpan);
+      row.appendChild(estSpan);
+      row.appendChild(outSpan);
+      row.appendChild(brierSpan);
+      histEl.appendChild(row);
+    });
+
+    // Save to localStorage
+    const allHistory = loadHistory();
+    allHistory.push({ date: new Date().toISOString(), meanBrier, rounds: rounds.length });
+    saveHistory(allHistory.slice(-50));
+  }
+
+  window.restartGame = function() {
+    document.getElementById('finalScreen').classList.add('hidden');
+    document.getElementById('startBtn').classList.remove('hidden');
+    document.getElementById('gameArea').classList.remove('hidden');
+    currentRound = 0;
+    rounds = [];
+    document.getElementById('runningBrier').textContent = '—';
+    document.getElementById('dieDisplay').textContent = '🎲';
+    document.getElementById('dieTypeLabel').textContent = '—';
+    document.getElementById('questionText').textContent = 'Press Start to begin';
+    document.getElementById('estimateArea').classList.add('hidden');
+    document.getElementById('resultArea').classList.add('hidden');
+    document.getElementById('progressBar').style.width = '0%';
+    document.getElementById('roundNum').textContent = '1';
+  };
+})();
+</script>
+</body>
+</html>
